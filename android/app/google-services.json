@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "546842735532",
+    "project_id": "tekateki22",
+    "storage_bucket": "tekateki22.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:546842735532:android:90fa8ced2d13899c514009",
+        "android_client_info": {
+          "package_name": "com.veruz.tekateki22"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBdUc1eIrMxDzMcVOkvVIcE6hzH70MIhiE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
