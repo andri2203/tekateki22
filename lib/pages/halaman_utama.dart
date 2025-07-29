@@ -14,14 +14,16 @@ class HalamanUtama extends StatefulWidget {
 class _HalamanUtamaState extends State<HalamanUtama> {
   final User? user = FirebaseAuth.instance.currentUser;
   late final String? displayName;
+  bool isAdmin = false;
 
   @override
   void initState() {
     super.initState();
-    if (user != null) {
-      displayName = user!.displayName;
+    if (user != null && user!.uid != "OYKsMAVvNQNPkzQ3SfQOafmaGNv1") {
+      displayName = user!.displayName ?? "";
     } else {
-      displayName = "administrator";
+      isAdmin = true;
+      displayName = user!.displayName ?? "administrator";
     }
   }
 
@@ -35,17 +37,33 @@ class _HalamanUtamaState extends State<HalamanUtama> {
         ),
         actions: [
           IconButton(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => HalamanPengaturan()),
-              );
-            },
-            icon: Icon(Icons.info_outline, color: Colors.white70),
-          ),
-          IconButton(
             onPressed: () async {
-              await FirebaseAuth.instance.signOut();
+              final shouldLogout = await showDialog<bool>(
+                context: context,
+                builder: (context) {
+                  return AlertDialog(
+                    title: const Text('Konfirmasi'),
+                    content: const Text('Apakah kamu yakin ingin keluar?'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(context).pop(false),
+                        child: const Text('Batal'),
+                      ),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red,
+                        ),
+                        onPressed: () => Navigator.of(context).pop(true),
+                        child: const Text('Keluar'),
+                      ),
+                    ],
+                  );
+                },
+              );
+
+              if (shouldLogout == true) {
+                await FirebaseAuth.instance.signOut();
+              }
             },
             icon: Icon(Icons.output, color: Colors.red.shade600),
           ),
@@ -73,7 +91,9 @@ class _HalamanUtamaState extends State<HalamanUtama> {
                 ElevatedButton(
                   onPressed: () {
                     Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => HalamanPengaturan()),
+                      MaterialPageRoute(
+                        builder: (_) => HalamanPengaturan(isAdmin: isAdmin),
+                      ),
                     );
                   },
                   style: buttonStyle,

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:tekateki22/pages/halaman_tambah_soal.dart';
-import '../components/styles.dart';
 
 class HalamanPengaturanSoal extends StatefulWidget {
   const HalamanPengaturanSoal({super.key});
@@ -69,25 +68,9 @@ class _HalamanPengaturanSoalState extends State<HalamanPengaturanSoal> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Text(
-                    'Belum ada data soal',
+                    'Belum ada data level',
                     textAlign: TextAlign.center,
                     style: TextStyle(color: Colors.white, fontSize: 18),
-                  ),
-                  SizedBox(height: 12),
-                  ElevatedButton(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => HalamanTambahSoal(),
-                        ),
-                      );
-                    },
-                    style: buttonStyle,
-                    child: Text(
-                      'Input Data Soal',
-                      style: TextStyle(color: Colors.white, fontSize: 18),
-                    ),
                   ),
                 ],
               ),
@@ -100,17 +83,21 @@ class _HalamanPengaturanSoalState extends State<HalamanPengaturanSoal> {
             child: ListView.builder(
               itemCount: data.docs.length,
               itemBuilder: (context, index) {
-                final dataSoal = data.docs[index];
+                final dataLevel = data.docs[index];
+                final reference = dataLevel.reference;
 
                 return ListTile(
-                  title: Text("Soal ${dataSoal['name']}", style: textStyle),
+                  title: Text("Soal ${dataLevel['name']}", style: textStyle),
                   trailing: iconArrowRight,
                   onTap: () {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
                         builder:
-                            (context) => HalamanTambahSoal(docID: dataSoal.id),
+                            (context) => HalamanTambahSoal(
+                              data: dataLevel.data(),
+                              reference: reference,
+                            ),
                       ),
                     );
                   },

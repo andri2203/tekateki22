@@ -3,7 +3,8 @@ import 'package:tekateki22/pages/halaman_akun_user.dart';
 import 'package:tekateki22/pages/halaman_pengaturan_soal.dart';
 
 class HalamanPengaturan extends StatefulWidget {
-  const HalamanPengaturan({super.key});
+  final bool isAdmin;
+  const HalamanPengaturan({super.key, required this.isAdmin});
 
   @override
   State<HalamanPengaturan> createState() => _HalamanPengaturanState();
@@ -35,18 +36,19 @@ class _HalamanPengaturanState extends State<HalamanPengaturan> {
               );
             },
           ),
-          ListTile(
-            title: Text("Pengaturan Soal", style: textStyle),
-            trailing: iconArrowRight,
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (BuildContext context) => HalamanPengaturanSoal(),
-                ),
-              );
-            },
-          ),
+          if (widget.isAdmin == true)
+            ListTile(
+              title: Text("Pengaturan Soal", style: textStyle),
+              trailing: iconArrowRight,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (BuildContext context) => HalamanPengaturanSoal(),
+                  ),
+                );
+              },
+            ),
         ],
       ),
     );

@@ -1,8 +1,9 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:tekateki22/models/level.dart';
-import '../components/styles.dart';
 import 'halaman_permainan.dart';
+import '../models/soal.dart';
 
 class HalamanLevel extends StatefulWidget {
   const HalamanLevel({super.key});
@@ -15,6 +16,27 @@ class _HalamanLevelState extends State<HalamanLevel> {
   final soalRef = FirebaseFirestore.instance.collection('permainan');
   final TextStyle textStyle = TextStyle(color: Colors.white);
   final Icon iconArrowRight = Icon(Icons.arrow_right, color: Colors.white);
+  Map<String, dynamic> gameHistory = <String, dynamic>{};
+  final User? user = FirebaseAuth.instance.currentUser;
+  bool loadingPoin = true;
+
+  @override
+  void initState() {
+    super.initState();
+    historyGamePlay();
+  }
+
+  Future<void> historyGamePlay() async {
+    final historyUserSnap =
+        await FirebaseFirestore.instance.collection(user!.uid).get();
+
+    setState(() {
+      gameHistory = {
+        for (var doc in historyUserSnap.docs) doc.id: doc.data()['poin'],
+      };
+      loadingPoin = false;
+    });
+  }
 
   CollectionReference<Map<String, dynamic>> dataSoal(String docID) {
     return soalRef.doc(docID).collection('soal');
@@ -79,30 +101,78 @@ class _HalamanLevelState extends State<HalamanLevel> {
             );
           }
 
+          final firstData = data.docs.first;
+
           return Container(
             width: MediaQuery.of(context).size.width,
             padding: EdgeInsets.symmetric(horizontal: 8),
             child: ListView.builder(
               itemCount: data.docs.length,
               itemBuilder: (context, index) {
+                Color boxColor = Colors.blue.shade600;
+                bool isEnableToTap = true;
                 final datalevel = data.docs[index];
+
+                final List<Soal> dataSoal =
+                    (datalevel.data()['soal'] as List)
+                        .map<Soal>(
+                          (data) =>
+                              Soal.fromMap({'docID': data['entryID'], ...data}),
+                        )
+                        .toList();
+
                 final Level level = Level.fromMap({
                   'docID': datalevel.id,
                   'name': datalevel.data()['name'],
                 });
+                final poin = gameHistory[level.docID];
 
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  child: ElevatedButton(
-                    onPressed: () {
+                final levelBefore = index != 0 ? data.docs[index - 1] : null;
+
+                if (poin == null) {
+                  if (firstData.id != level.docID) {
+                    if (levelBefore != null) {
+                      final int? poinBefore = gameHistory[levelBefore.id];
+                      if (poinBefore == null || poinBefore == 0) {
+                        isEnableToTap = false;
+                        boxColor = Colors.blue.shade900;
+                      }
+                    }
+                  }
+                }
+
+                return Container(
+                  margin: const EdgeInsets.symmetric(vertical: 12),
+                  decoration: BoxDecoration(
+                    color: boxColor,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: ListTile(
+                    onTap: () {
+                      if (isEnableToTap == false) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text("Selesaikan Level Sebelumnya"),
+                          ),
+                        );
+                        return;
+                      }
+
                       Navigator.of(context).push(
                         MaterialPageRoute(
-                          builder: (context) => HalamanPermainan(level: level),
+                          builder:
+                              (context) => HalamanPermainan(
+                                level: level,
+                                dataSoal: dataSoal,
+                              ),
                         ),
                       );
                     },
-                    style: buttonStyle,
-                    child: Text(level.name, style: textStyle),
+                    title: Text(level.name, style: textStyle),
+                    trailing:
+                        loadingPoin
+                            ? CircularProgressIndicator()
+                            : Text("${poin ?? 0}/100", style: textStyle),
                   ),
                 );
               },

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../components/styles.dart';
 import '../models/level.dart';
@@ -7,7 +8,12 @@ import '../models/soal.dart';
 
 class HalamanPermainan extends StatefulWidget {
   final Level level;
-  const HalamanPermainan({super.key, required this.level});
+  final List<Soal> dataSoal;
+  const HalamanPermainan({
+    super.key,
+    required this.level,
+    required this.dataSoal,
+  });
 
   @override
   State<HalamanPermainan> createState() => _HalamanPermainanState();
@@ -25,11 +31,20 @@ class _HalamanPermainanState extends State<HalamanPermainan> {
   int soalIndex = 0;
   late Soal soalActive;
   Map<int, String?> isiJawaban = <int, String?>{};
+  List<int> indexSoalSelesai = <int>[];
+  final User? user = FirebaseAuth.instance.currentUser;
+  DocumentReference<Map<String, dynamic>>? userPoinHistory;
 
   @override
   void initState() {
     super.initState();
     generateFixedGrid();
+
+    if (user != null) {
+      userPoinHistory = FirebaseFirestore.instance
+          .collection(user!.uid)
+          .doc(widget.level.docID);
+    }
   }
 
   void startTimer() {
@@ -40,44 +55,18 @@ class _HalamanPermainanState extends State<HalamanPermainan> {
         });
       } else {
         timer.cancel();
-        // Tambahkan aksi saat timer selesai, misalnya tampilkan dialog atau navigasi
-        // showDialog(
-        //   context: context,
-        //   builder: (context) {
-        //     return AlertDialog(title: const Text('Waktu Telah Habis'));
-        //   },
-        // ).then((_) {
-        //   if (mounted) {
-        //     Navigator.of(context).pop();
-        //   }
-        // });
+        handlePoinPermainan(isTimeOut: true);
       }
     });
     setState(() {});
   }
 
-  Future<void> generateFixedGrid() async {
-    final CollectionReference<Map<String, dynamic>> soalRef = FirebaseFirestore
-        .instance
-        .collection('permainan')
-        .doc(widget.level.docID)
-        .collection('soal');
+  void generateFixedGrid() {
+    final List<Soal> dataSoal = widget.dataSoal;
 
-    final snapshot = await soalRef.get();
-    final List<Soal> dataSoal =
-        snapshot.docs
-            .map((data) => Soal.fromMap({'docID': data.id, ...data.data()}))
-            .toList();
-
-    soalTerpilih = dataSoal;
+    soalTerpilih = widget.dataSoal;
 
     soalActive = soalTerpilih[soalIndex];
-
-    gridCount =
-        dataSoal
-            .reduce((a, b) => a.jawaban.length >= b.jawaban.length ? a : b)
-            .jawaban
-            .length;
 
     final panjangGrid = gridCount;
 
@@ -161,7 +150,72 @@ class _HalamanPermainanState extends State<HalamanPermainan> {
     );
   }
 
-  void handlePoinPermainan() {}
+  int calculatePoints({
+    required int totalQuestions,
+    required int answeredQuestions,
+    required int elapsedSeconds,
+    required int maxTimeSeconds,
+  }) {
+    // Kalau semua soal dijawab
+    if (answeredQuestions >= totalQuestions) {
+      if (elapsedSeconds <= 30) return 100;
+      if (elapsedSeconds <= 60) return 80;
+      if (elapsedSeconds <= 90) return 60;
+      if (elapsedSeconds <= maxTimeSeconds) return 50;
+    }
+
+    // Kalau belum selesai menjawab saat waktu habis
+    if (elapsedSeconds >= maxTimeSeconds &&
+        answeredQuestions < totalQuestions) {
+      double percent = answeredQuestions / totalQuestions;
+      return (50 * percent).round(); // maksimum poin 50 dikalikan progress
+    }
+
+    // Kalau waktu belum habis tapi soal belum selesai → belum final
+    return 0;
+  }
+
+  Future<void> handlePoinPermainan({isTimeOut = false}) async {
+    int timeLimit = 120;
+    int timeTaken = timeLimit - remainingSeconds;
+    int poin = calculatePoints(
+      totalQuestions: soalTerpilih.length,
+      answeredQuestions: indexSoalSelesai.length,
+      elapsedSeconds: timeTaken,
+      maxTimeSeconds: timeLimit,
+    );
+
+    if (userPoinHistory != null) {
+      final docSnapshot = await userPoinHistory!.get();
+
+      if (docSnapshot.exists) {
+        // Dokumen sudah ada → update poin
+        await userPoinHistory!.update({'poin': poin});
+      } else {
+        // Dokumen belum ada → buat baru
+        await userPoinHistory!.set({'poin': poin});
+      }
+
+      String pesan = "Anda mendapatkan poin : $poin";
+
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (context) {
+            return AlertDialog(
+              title: Text(
+                '${isTimeOut ? "Waktu Anda Telah Habis. " : "Permainan telah selesai. "}$pesan',
+              ),
+            );
+          },
+        ).then((_) {
+          if (mounted) {
+            Navigator.of(context).pop();
+          }
+        });
+      }
+    }
+  }
 
   Widget papanPermainan(BuildContext context) {
     return Padding(
@@ -256,7 +310,7 @@ class _HalamanPermainanState extends State<HalamanPermainan> {
             physics: NeverScrollableScrollPhysics(),
             shrinkWrap: true,
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: gridCount,
+              crossAxisCount: 7,
               crossAxisSpacing: 6,
               mainAxisSpacing: 6,
             ),
@@ -285,7 +339,44 @@ class _HalamanPermainanState extends State<HalamanPermainan> {
                     }
                   }
 
+                  for (var i = 0; i < soalTerpilih.length; i++) {
+                    Soal soal = soalTerpilih[i];
+                    int indexSoal = soal.x + (soal.y * gridCount);
+                    List<int> keysToCombine = <int>[];
+
+                    for (var j = 0; j < soal.jawaban.length; j++) {
+                      String jawabanChar = soal.jawaban[j];
+                      int indexJawaban;
+
+                      if (soal.arah == Arah.mendatar) {
+                        indexJawaban = indexSoal + j;
+                      } else {
+                        indexJawaban = indexSoal + (j * gridCount);
+                      }
+
+                      if (jawabanChar == isiJawaban[indexJawaban]) {
+                        keysToCombine.add(indexJawaban);
+                      }
+                    }
+
+                    if (keysToCombine.isNotEmpty && soalIndex == i) {
+                      String jawabanDiIsi =
+                          keysToCombine
+                              .map((key) => isiJawaban[key] ?? '')
+                              .join();
+
+                      if (jawabanDiIsi.contains(soal.jawaban)) {
+                        indexSoalSelesai.add(soalIndex);
+                      }
+                    }
+                  }
+
                   setState(() {});
+
+                  if (indexSoalSelesai.length == soalTerpilih.length) {
+                    timer?.cancel();
+                    handlePoinPermainan();
+                  }
                 },
                 style: buttonStyle,
                 child: Text(
@@ -293,7 +384,7 @@ class _HalamanPermainanState extends State<HalamanPermainan> {
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: Colors.white,
-                    fontSize: 18,
+                    fontSize: 16,
                     fontWeight: FontWeight.w700,
                   ),
                 ),

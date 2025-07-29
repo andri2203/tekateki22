@@ -19,7 +19,7 @@ class Soal {
 
   factory Soal.fromMap(Map<String, dynamic> data) {
     return Soal(
-      docID: data['docID'],
+      docID: data['docID'].toString(),
       pertanyaan: data['pertanyaan'],
       jawaban: data['jawaban'],
       arah: data['menurun'] ? Arah.menurun : Arah.mendatar,
