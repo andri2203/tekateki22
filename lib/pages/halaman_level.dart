@@ -114,12 +114,20 @@ class _HalamanLevelState extends State<HalamanLevel> {
                 final datalevel = data.docs[index];
 
                 final List<Soal> dataSoal =
-                    (datalevel.data()['soal'] as List)
-                        .map<Soal>(
-                          (data) =>
-                              Soal.fromMap({'docID': data['entryID'], ...data}),
-                        )
-                        .toList();
+                    datalevel.data().containsKey('soal') == false
+                        ? []
+                        : (datalevel.data()['soal'] as List)
+                            .map<Soal>(
+                              (data) => Soal.fromMap({
+                                'docID': data['entryID'],
+                                ...data,
+                              }),
+                            )
+                            .toList();
+
+                if (dataSoal.isEmpty) {
+                  boxColor = Colors.red.shade600;
+                }
 
                 final Level level = Level.fromMap({
                   'docID': datalevel.id,
@@ -135,7 +143,10 @@ class _HalamanLevelState extends State<HalamanLevel> {
                       final int? poinBefore = gameHistory[levelBefore.id];
                       if (poinBefore == null || poinBefore == 0) {
                         isEnableToTap = false;
-                        boxColor = Colors.blue.shade900;
+                        boxColor =
+                            dataSoal.isEmpty
+                                ? Colors.red.shade900
+                                : Colors.blue.shade900;
                       }
                     }
                   }
@@ -158,17 +169,36 @@ class _HalamanLevelState extends State<HalamanLevel> {
                         return;
                       }
 
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder:
-                              (context) => HalamanPermainan(
-                                level: level,
-                                dataSoal: dataSoal,
-                              ),
-                        ),
-                      );
+                      if (dataSoal.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text("Soal belum tersedia, mohon tunggu"),
+                          ),
+                        );
+                        return;
+                      }
+
+                      Navigator.of(context)
+                          .push(
+                            MaterialPageRoute(
+                              builder:
+                                  (context) => HalamanPermainan(
+                                    level: level,
+                                    dataSoal: dataSoal,
+                                  ),
+                            ),
+                          )
+                          .then((_) {
+                            setState(() {
+                              loadingPoin = true;
+                            });
+                            historyGamePlay();
+                          });
                     },
-                    title: Text(level.name, style: textStyle),
+                    title: Text(
+                      "${level.name} ${dataSoal.isEmpty ? '(belum ada soal)' : ''}",
+                      style: textStyle,
+                    ),
                     trailing:
                         loadingPoin
                             ? CircularProgressIndicator()

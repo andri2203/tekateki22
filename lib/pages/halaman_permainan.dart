@@ -1,4 +1,10 @@
 import 'dart:async';
+import 'dart:typed_data';
+import 'dart:io';
+import 'dart:ui' as ui;
+import 'package:flutter/rendering.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -34,6 +40,7 @@ class _HalamanPermainanState extends State<HalamanPermainan> {
   List<int> indexSoalSelesai = <int>[];
   final User? user = FirebaseAuth.instance.currentUser;
   DocumentReference<Map<String, dynamic>>? userPoinHistory;
+  final GlobalKey _globalKey = GlobalKey();
 
   @override
   void initState() {
@@ -150,6 +157,54 @@ class _HalamanPermainanState extends State<HalamanPermainan> {
     );
   }
 
+  Future<void> shareCard() async {
+    try {
+      // Ambil RenderRepaintBoundary dari global key
+      RenderRepaintBoundary boundary =
+          _globalKey.currentContext!.findRenderObject()
+              as RenderRepaintBoundary;
+
+      // Convert ke image
+      ui.Image image = await boundary.toImage(pixelRatio: 3.0); // biar HD
+      ByteData? byteData = await image.toByteData(
+        format: ui.ImageByteFormat.png,
+      );
+      Uint8List pngBytes = byteData!.buffer.asUint8List();
+
+      // Simpan ke file temporary
+      final tempDir = await getTemporaryDirectory();
+      final file = File(
+        '${tempDir.path}/share_tts_${DateTime.now().millisecondsSinceEpoch}.png',
+      );
+      await file.writeAsBytes(pngBytes);
+
+      // Share file
+      await SharePlus.instance.share(
+        ShareParams(
+          title: 'Ayo adu skor TTS sama aku!',
+          text: 'Ayo adu skor TTS sama aku!',
+          files: [XFile(file.path)],
+          previewThumbnail: XFile(file.path),
+          sharePositionOrigin: Rect.fromLTWH(0, 0, 1, 1),
+        ),
+      );
+
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (context) {
+            return AlertDialog(
+              title: Text('Terjadi Kesalahan ${e.toString()}'),
+            );
+          },
+        );
+      }
+      return;
+    }
+  }
+
   int calculatePoints({
     required int totalQuestions,
     required int answeredQuestions,
@@ -176,45 +231,133 @@ class _HalamanPermainanState extends State<HalamanPermainan> {
   }
 
   Future<void> handlePoinPermainan({isTimeOut = false}) async {
-    int timeLimit = 120;
-    int timeTaken = timeLimit - remainingSeconds;
-    int poin = calculatePoints(
-      totalQuestions: soalTerpilih.length,
-      answeredQuestions: indexSoalSelesai.length,
-      elapsedSeconds: timeTaken,
-      maxTimeSeconds: timeLimit,
-    );
+    try {
+      int timeLimit = 120;
+      int timeTaken = timeLimit - remainingSeconds;
+      int poin = calculatePoints(
+        totalQuestions: soalTerpilih.length,
+        answeredQuestions: indexSoalSelesai.length,
+        elapsedSeconds: timeTaken,
+        maxTimeSeconds: timeLimit,
+      );
+      if (userPoinHistory != null) {
+        final docSnapshot = await userPoinHistory!.get();
 
-    if (userPoinHistory != null) {
-      final docSnapshot = await userPoinHistory!.get();
+        if (docSnapshot.exists) {
+          // Dokumen sudah ada → update poin
+          await userPoinHistory!.update({'poin': poin});
+        } else {
+          // Dokumen belum ada → buat baru
+          await userPoinHistory!.set({'poin': poin});
+        }
 
-      if (docSnapshot.exists) {
-        // Dokumen sudah ada → update poin
-        await userPoinHistory!.update({'poin': poin});
-      } else {
-        // Dokumen belum ada → buat baru
-        await userPoinHistory!.set({'poin': poin});
+        if (mounted) {
+          showDialog(
+            context: context,
+            builder: (context) {
+              return AlertDialog(
+                title: Text(
+                  isTimeOut
+                      ? "Waktu Anda Telah Habis. "
+                      : "Permainan telah selesai. ",
+                ),
+                actions: [
+                  ElevatedButton.icon(
+                    onPressed: shareCard, // panggil fungsi share
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 12,
+                      ),
+                    ),
+                    icon: const Icon(Icons.share, color: Colors.white),
+                    label: const Text(
+                      "Bagikan",
+                      style: TextStyle(color: Colors.white, fontSize: 16),
+                    ),
+                  ),
+                ],
+                content: RepaintBoundary(
+                  key: _globalKey,
+                  child: cardSharePoint(context, poin),
+                ),
+              );
+            },
+          ).then((_) {
+            if (mounted) {
+              Navigator.of(context).pop();
+            }
+          });
+        }
       }
-
-      String pesan = "Anda mendapatkan poin : $poin";
-
+    } catch (e) {
       if (mounted) {
         showDialog(
           context: context,
           builder: (context) {
             return AlertDialog(
-              title: Text(
-                '${isTimeOut ? "Waktu Anda Telah Habis. " : "Permainan telah selesai. "}$pesan',
-              ),
+              title: Text('Terjadi Kesalahan ${e.toString()}'),
             );
           },
-        ).then((_) {
-          if (mounted) {
-            Navigator.of(context).pop();
-          }
-        });
+        );
       }
+      return;
     }
+  }
+
+  Widget cardSharePoint(BuildContext context, int poin) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Pesan Utama
+          Text(
+            "Terimakasih telah memainkan TTS kami.\nAnda mendapatkan poin $poin di ${widget.level.name}.",
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              color: Colors.black87,
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // Ajakan Share
+          Text(
+            "Bagikan ke teman-teman anda,\nadu pengetahuan dan skor bersama!",
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 14, color: Colors.grey[700]),
+          ),
+          const SizedBox(height: 20),
+
+          // Footer Terimakasih
+          Text(
+            "Terimakasih",
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: Colors.grey[600],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget papanPermainan(BuildContext context) {
@@ -391,6 +534,37 @@ class _HalamanPermainanState extends State<HalamanPermainan> {
               );
             },
           ),
+          const SizedBox(height: 12),
+          ElevatedButton.icon(
+            label: const Text(
+              "Hapus Jawaban Salah",
+              style: TextStyle(color: Colors.white),
+            ),
+            onPressed: () {
+              for (var i = 0; i < soalTerpilih.length; i++) {
+                Soal soal = soalTerpilih[i];
+                int indexSoal = soal.x + (soal.y * gridCount);
+
+                for (int j = 0; j < soal.jawaban.length; j++) {
+                  String char = soal.jawaban[j];
+                  int currentIndex =
+                      soal.arah == Arah.mendatar
+                          ? indexSoal + j
+                          : indexSoal + (j * gridCount);
+
+                  if (isiJawaban[currentIndex] != null &&
+                      isiJawaban[currentIndex] != char) {
+                    isiJawaban[currentIndex] = null;
+                  }
+                }
+              }
+            },
+            icon: Icon(Icons.delete),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              iconColor: Colors.white,
+            ),
+          ),
         ],
       ),
     );
@@ -454,37 +628,44 @@ class _HalamanPermainanState extends State<HalamanPermainan> {
                 ? Center(child: CircularProgressIndicator())
                 : papanPermainan(context),
         persistentFooterAlignment: AlignmentDirectional.center,
-        persistentFooterButtons:
-            List<int>.generate(
-              soalTerpilih.length,
-              (int index) => index,
-              growable: true,
-            ).map((nomor) {
-              return ElevatedButton(
-                onPressed: () {
-                  setState(() {
-                    if (soalIndex != nomor) {
-                      soalIndex = nomor;
-                      soalActive = soalTerpilih[nomor];
-                    }
-                  });
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor:
-                      soalIndex == nomor
-                          ? Colors.green.shade600
-                          : Colors.blue.shade600,
-                ),
-                child: Text(
-                  "${nomor + 1}",
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              );
-            }).toList(),
+        persistentFooterButtons: [
+          Wrap(
+            spacing: 4,
+            runSpacing: 4,
+            alignment: WrapAlignment.center,
+            children:
+                List<int>.generate(
+                  soalTerpilih.length,
+                  (int index) => index,
+                ).map((nomor) {
+                  return ElevatedButton(
+                    onPressed: () {
+                      setState(() {
+                        if (soalIndex != nomor) {
+                          soalIndex = nomor;
+                          soalActive = soalTerpilih[nomor];
+                        }
+                      });
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor:
+                          soalIndex == nomor
+                              ? Colors.green.shade600
+                              : Colors.blue.shade600,
+                      minimumSize: const Size(40, 40),
+                    ),
+                    child: Text(
+                      "${nomor + 1}",
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  );
+                }).toList(),
+          ),
+        ],
       ),
     );
   }

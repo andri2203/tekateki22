@@ -3,12 +3,14 @@ import 'package:flutter/material.dart';
 import 'dart:math';
 
 class HalamanTambahSoal extends StatefulWidget {
+  final bool isNewLevel;
   final Map<String, dynamic> data;
-  final DocumentReference<Map<String, dynamic>> reference;
+  final DocumentReference<Map<String, dynamic>>? reference;
   const HalamanTambahSoal({
     super.key,
+    this.isNewLevel = false,
     required this.data,
-    required this.reference,
+    this.reference,
   });
 
   @override
@@ -338,6 +340,8 @@ class _HalamanTambahSoalState extends State<HalamanTambahSoal> {
     });
 
     try {
+      DocumentReference<Map<String, dynamic>>? reference = widget.reference;
+
       Map<String, dynamic> data = {
         'name': widget.data['name'],
         'soal':
@@ -354,7 +358,16 @@ class _HalamanTambahSoalState extends State<HalamanTambahSoal> {
                 )
                 .toList(),
       };
-      await widget.reference.update(data);
+      if (widget.isNewLevel == false && reference != null) {
+        await reference.update(data);
+      } else {
+        await FirebaseFirestore.instance
+            .collection('permainan')
+            .doc(
+              widget.data['name'].toString().toLowerCase().replaceAll(" ", "-"),
+            )
+            .set(data);
+      }
       setState(() {
         isLoading = false;
       });
@@ -383,6 +396,41 @@ class _HalamanTambahSoalState extends State<HalamanTambahSoal> {
     }
   }
 
+  Future<void> handleDeleteLevel() async {
+    final isDelete = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text(
+            "Yakin ingin di hapus?",
+            style: TextStyle(fontSize: 18),
+          ),
+          content: const Text("Level akan di hapus beserta soalnya."),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Tidak, Batal'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Ya, Hapus'),
+            ),
+          ],
+        );
+      },
+    );
+
+    DocumentReference<Map<String, dynamic>>? reference = widget.reference;
+
+    if (isDelete == true && reference != null) {
+      reference.delete();
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+    }
+  }
+
   @override
   void dispose() {
     scrollController.dispose();
@@ -405,10 +453,17 @@ class _HalamanTambahSoalState extends State<HalamanTambahSoal> {
         appBar: AppBar(
           iconTheme: IconThemeData(color: Colors.white),
           title: Text(
-            "Tambah Soal ${widget.data['name']}",
+            "Tambah Soal ${widget.data['name']} ${widget.isNewLevel == true ? '(Baru)' : ''}",
             style: TextStyle(color: Colors.white),
           ),
           centerTitle: true,
+          actions: [
+            if (widget.isNewLevel == false)
+              IconButton(
+                onPressed: handleDeleteLevel,
+                icon: Icon(Icons.delete),
+              ),
+          ],
         ),
         floatingActionButton: FloatingActionButton.extended(
           icon: Icon(Icons.upload),
@@ -425,6 +480,36 @@ class _HalamanTambahSoalState extends State<HalamanTambahSoal> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
+                      if (widget.isNewLevel == true)
+                        Container(
+                          width: double.infinity,
+                          margin: EdgeInsets.only(bottom: 16),
+                          padding: EdgeInsets.symmetric(
+                            vertical: 10,
+                            horizontal: 12,
+                          ),
+                          color: Colors.blue,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.info_outline,
+                                size: 20,
+                                color: Colors.white,
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                "Level baru (${widget.data['name']}) akan tertambah setelah unggah soal",
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w500,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       formSoal(context),
                       const SizedBox(height: 32),
                       const Text(
