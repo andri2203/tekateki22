@@ -108,14 +108,21 @@ class _HalamanPengaturanSoalState extends State<HalamanPengaturanSoal> {
             );
           }
 
+          final List<QueryDocumentSnapshot<Map<String, dynamic>>> dataSort =
+              data.docs..sort((a, b) {
+                int idPrev = int.parse(a.id.replaceAll('level-', ""));
+                int idNext = int.parse(b.id.replaceAll('level-', ""));
+                return idPrev.compareTo(idNext);
+              });
+
           return Container(
             width: MediaQuery.of(context).size.width,
             padding: EdgeInsets.symmetric(horizontal: 8),
             child: ListView.builder(
               shrinkWrap: true,
-              itemCount: data.docs.length,
+              itemCount: dataSort.length,
               itemBuilder: (context, index) {
-                final dataLevel = data.docs[index];
+                final dataLevel = dataSort[index];
                 final reference = dataLevel.reference;
 
                 return ListTile(

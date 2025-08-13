@@ -26,18 +26,19 @@ class HalamanPermainan extends StatefulWidget {
 }
 
 class _HalamanPermainanState extends State<HalamanPermainan> {
-  int remainingSeconds = 120;
   int gridCount = 10;
   Timer? timer;
   List<String?> grid = [];
   List<String> kunciJawaban = [];
   List<Soal> soalTerpilih = [];
-  Map<int, int?> nomorSoal = {};
+  Map<int, List<int>> nomorSoal = {};
   bool loading = true;
   int soalIndex = 0;
   late Soal soalActive;
   Map<int, String?> isiJawaban = <int, String?>{};
   List<int> indexSoalSelesai = <int>[];
+  int waktuPermainan = 0;
+  int remainingSeconds = 0;
   final User? user = FirebaseAuth.instance.currentUser;
   DocumentReference<Map<String, dynamic>>? userPoinHistory;
   final GlobalKey _globalKey = GlobalKey();
@@ -72,7 +73,8 @@ class _HalamanPermainanState extends State<HalamanPermainan> {
     final List<Soal> dataSoal = widget.dataSoal;
 
     soalTerpilih = widget.dataSoal;
-
+    waktuPermainan = soalTerpilih.length * 60;
+    remainingSeconds = soalTerpilih.length * 60;
     soalActive = soalTerpilih[soalIndex];
 
     final panjangGrid = gridCount;
@@ -84,7 +86,10 @@ class _HalamanPermainanState extends State<HalamanPermainan> {
     for (var i = 0; i < dataSoal.length; i++) {
       Soal soal = dataSoal[i];
       int startIndex = soal.x + (soal.y * panjangGrid);
-      nomorSoal[startIndex] = i + 1;
+      // kalau belum ada key-nya, buat list kosong
+      nomorSoal[startIndex] ??= [];
+      // tambahkan nomor ke list
+      nomorSoal[startIndex]!.add(i + 1);
       kata.add(soal.jawaban);
 
       for (var j = 0; j < soal.jawaban.length; j++) {
@@ -211,28 +216,15 @@ class _HalamanPermainanState extends State<HalamanPermainan> {
     required int elapsedSeconds,
     required int maxTimeSeconds,
   }) {
-    // Kalau semua soal dijawab
-    if (answeredQuestions >= totalQuestions) {
-      if (elapsedSeconds <= 30) return 100;
-      if (elapsedSeconds <= 60) return 80;
-      if (elapsedSeconds <= 90) return 60;
-      if (elapsedSeconds <= maxTimeSeconds) return 50;
-    }
-
-    // Kalau belum selesai menjawab saat waktu habis
-    if (elapsedSeconds >= maxTimeSeconds &&
-        answeredQuestions < totalQuestions) {
-      double percent = answeredQuestions / totalQuestions;
-      return (50 * percent).round(); // maksimum poin 50 dikalikan progress
-    }
-
-    // Kalau waktu belum habis tapi soal belum selesai → belum final
-    return 0;
+    return ((100 - (elapsedSeconds / maxTimeSeconds * 100) * 0.5) *
+            (answeredQuestions / totalQuestions))
+        .clamp(0, 100)
+        .round();
   }
 
   Future<void> handlePoinPermainan({isTimeOut = false}) async {
     try {
-      int timeLimit = 120;
+      int timeLimit = waktuPermainan;
       int timeTaken = timeLimit - remainingSeconds;
       int poin = calculatePoints(
         totalQuestions: soalTerpilih.length,
@@ -376,7 +368,7 @@ class _HalamanPermainanState extends State<HalamanPermainan> {
             itemCount: gridCount * gridCount,
             itemBuilder: (context, index) {
               String? char = grid[index];
-              int? nomor = nomorSoal[index];
+              List<int> nomorList = nomorSoal[index] ?? [];
 
               return GestureDetector(
                 onTap: () {
@@ -387,6 +379,7 @@ class _HalamanPermainanState extends State<HalamanPermainan> {
                   });
                 },
                 child: Stack(
+                  clipBehavior: Clip.none,
                   children: [
                     Container(
                       decoration: BoxDecoration(
@@ -407,21 +400,23 @@ class _HalamanPermainanState extends State<HalamanPermainan> {
                                 : Text(isiJawaban[index] ?? ""),
                       ),
                     ),
-                    if (nomor != null)
+                    if (nomorList.isNotEmpty)
                       Positioned(
-                        top: 0,
-                        right: 0,
+                        top: nomorList.length == 1 ? -5 : -10,
+                        right: nomorList.length == 1 ? -5 : 0,
                         child: Container(
                           padding: EdgeInsets.symmetric(
                             vertical: 2,
                             horizontal: 5,
                           ),
                           decoration: BoxDecoration(
-                            color: Theme.of(context).primaryColor,
+                            color: Colors.blue.shade600,
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: Text(
-                            nomor.toString(),
+                            nomorList.length == 1
+                                ? nomorList.first.toString()
+                                : nomorList.join(', '),
                             style: TextStyle(fontSize: 10, color: Colors.white),
                           ),
                         ),
@@ -535,36 +530,6 @@ class _HalamanPermainanState extends State<HalamanPermainan> {
             },
           ),
           const SizedBox(height: 12),
-          ElevatedButton.icon(
-            label: const Text(
-              "Hapus Jawaban Salah",
-              style: TextStyle(color: Colors.white),
-            ),
-            onPressed: () {
-              for (var i = 0; i < soalTerpilih.length; i++) {
-                Soal soal = soalTerpilih[i];
-                int indexSoal = soal.x + (soal.y * gridCount);
-
-                for (int j = 0; j < soal.jawaban.length; j++) {
-                  String char = soal.jawaban[j];
-                  int currentIndex =
-                      soal.arah == Arah.mendatar
-                          ? indexSoal + j
-                          : indexSoal + (j * gridCount);
-
-                  if (isiJawaban[currentIndex] != null &&
-                      isiJawaban[currentIndex] != char) {
-                    isiJawaban[currentIndex] = null;
-                  }
-                }
-              }
-            },
-            icon: Icon(Icons.delete),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              iconColor: Colors.white,
-            ),
-          ),
         ],
       ),
     );

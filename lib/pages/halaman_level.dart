@@ -102,16 +102,22 @@ class _HalamanLevelState extends State<HalamanLevel> {
           }
 
           final firstData = data.docs.first;
+          final List<QueryDocumentSnapshot<Map<String, dynamic>>> dataSort =
+              data.docs..sort((a, b) {
+                int idPrev = int.parse(a.id.replaceAll('level-', ""));
+                int idNext = int.parse(b.id.replaceAll('level-', ""));
+                return idPrev.compareTo(idNext);
+              });
 
           return Container(
             width: MediaQuery.of(context).size.width,
             padding: EdgeInsets.symmetric(horizontal: 8),
             child: ListView.builder(
-              itemCount: data.docs.length,
+              itemCount: dataSort.length,
               itemBuilder: (context, index) {
                 Color boxColor = Colors.blue.shade600;
                 bool isEnableToTap = true;
-                final datalevel = data.docs[index];
+                final datalevel = dataSort[index];
 
                 final List<Soal> dataSoal =
                     datalevel.data().containsKey('soal') == false
@@ -135,7 +141,7 @@ class _HalamanLevelState extends State<HalamanLevel> {
                 });
                 final poin = gameHistory[level.docID];
 
-                final levelBefore = index != 0 ? data.docs[index - 1] : null;
+                final levelBefore = index != 0 ? dataSort[index - 1] : null;
 
                 if (poin == null) {
                   if (firstData.id != level.docID) {
