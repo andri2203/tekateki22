@@ -1,14 +1,13 @@
 import 'dart:async';
-import 'dart:typed_data';
 import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import '../components/styles.dart';
 import '../models/level.dart';
 import '../models/soal.dart';
 
@@ -28,7 +27,12 @@ class HalamanPermainan extends StatefulWidget {
 class _HalamanPermainanState extends State<HalamanPermainan> {
   int gridCount = 10;
   Timer? timer;
-  List<String?> grid = [];
+  List<String> grid = [];
+  final ValueNotifier<List<bool>> gridCharCorrect = ValueNotifier(
+    List.generate(10 * 10, (_) => false),
+  );
+  List<TextEditingController> controllers = [];
+  List<FocusNode> focusNodes = [];
   List<String> kunciJawaban = [];
   List<Soal> soalTerpilih = [];
   Map<int, List<int>> nomorSoal = {};
@@ -42,16 +46,57 @@ class _HalamanPermainanState extends State<HalamanPermainan> {
   final User? user = FirebaseAuth.instance.currentUser;
   DocumentReference<Map<String, dynamic>>? userPoinHistory;
   final GlobalKey _globalKey = GlobalKey();
+  List<int> indexGridActive = [];
+  int currentActiveIndex = 0;
 
   @override
   void initState() {
     super.initState();
+
     generateFixedGrid();
 
     if (user != null) {
       userPoinHistory = FirebaseFirestore.instance
           .collection(user!.uid)
           .doc(widget.level.docID);
+    }
+  }
+
+  void _moveToNext(int currentIndex) {
+    int pos = indexGridActive.indexOf(currentIndex);
+    if (pos != -1 && pos < indexGridActive.length - 1) {
+      int nextIndex = indexGridActive[pos + 1];
+
+      // Cek apakah sudah ada isi ATAU sudah correct
+      if (controllers[nextIndex].text.isNotEmpty ||
+          gridCharCorrect.value[nextIndex]) {
+        // rekursif, lompat ke berikutnya sampai ketemu yang kosong/salah
+        _moveToNext(nextIndex);
+      } else {
+        FocusScope.of(context).requestFocus(focusNodes[nextIndex]);
+        currentActiveIndex = nextIndex;
+      }
+    }
+  }
+
+  void _moveToPrev(int currentIndex) {
+    int pos = indexGridActive.indexOf(currentIndex);
+
+    if (pos > 0) {
+      int prevIndex = indexGridActive[pos - 1];
+
+      FocusScope.of(context).requestFocus(focusNodes[prevIndex]);
+      currentActiveIndex = prevIndex;
+
+      // kalau char sudah correct → kunci dengan cara reset controllernya
+      if (gridCharCorrect.value[prevIndex]) {
+        FocusScope.of(context).requestFocus(focusNodes[prevIndex - 1]);
+        // pastikan teks tetap sama (tidak bisa dihapus)
+        final text = controllers[prevIndex].text;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          controllers[prevIndex].text = text;
+        });
+      }
     }
   }
 
@@ -63,7 +108,10 @@ class _HalamanPermainanState extends State<HalamanPermainan> {
         });
       } else {
         timer.cancel();
-        handlePoinPermainan(isTimeOut: true);
+        handlePoinPermainan(
+          isTimeOut: true,
+          correctChar: gridCharCorrect.value,
+        );
       }
     });
     setState(() {});
@@ -76,12 +124,33 @@ class _HalamanPermainanState extends State<HalamanPermainan> {
     waktuPermainan = soalTerpilih.length * 60;
     remainingSeconds = soalTerpilih.length * 60;
     soalActive = soalTerpilih[soalIndex];
+    int startIndexActive = soalActive.x + (soalActive.y * gridCount);
+
+    // auto buka keyboard
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      FocusScope.of(context).requestFocus(focusNodes[startIndexActive]);
+    });
+
+    for (var i = 0; i < soalActive.jawaban.length; i++) {
+      int currIdx = i;
+
+      if (soalActive.arah == Arah.menurun) {
+        currIdx = startIndexActive + (i * gridCount);
+      } else {
+        currIdx = startIndexActive + i;
+      }
+
+      indexGridActive.add(currIdx);
+    }
 
     final panjangGrid = gridCount;
 
-    grid = List.generate(panjangGrid * panjangGrid, (_) => null);
-
-    List<String> kata = [];
+    grid = List.generate(panjangGrid * panjangGrid, (_) => "");
+    controllers = List.generate(
+      panjangGrid * panjangGrid,
+      (_) => TextEditingController(),
+    );
+    focusNodes = List.generate(panjangGrid * panjangGrid, (_) => FocusNode());
 
     for (var i = 0; i < dataSoal.length; i++) {
       Soal soal = dataSoal[i];
@@ -90,7 +159,6 @@ class _HalamanPermainanState extends State<HalamanPermainan> {
       nomorSoal[startIndex] ??= [];
       // tambahkan nomor ke list
       nomorSoal[startIndex]!.add(i + 1);
-      kata.add(soal.jawaban);
 
       for (var j = 0; j < soal.jawaban.length; j++) {
         int currentIndex;
@@ -110,11 +178,6 @@ class _HalamanPermainanState extends State<HalamanPermainan> {
       }
     }
 
-    List<String> hurufUnik =
-        kata.join().toUpperCase().split('').toSet().toList();
-    hurufUnik.sort();
-
-    kunciJawaban = hurufUnik;
     loading = false;
     setState(() {});
     startTimer();
@@ -211,24 +274,30 @@ class _HalamanPermainanState extends State<HalamanPermainan> {
   }
 
   int calculatePoints({
-    required int totalQuestions,
-    required int answeredQuestions,
+    required int totalCells,
+    required List<bool> gridCharCorrect,
     required int elapsedSeconds,
     required int maxTimeSeconds,
   }) {
+    final answeredCells =
+        gridCharCorrect.where((isCorrect) => isCorrect).length;
+
     return ((100 - (elapsedSeconds / maxTimeSeconds * 100) * 0.5) *
-            (answeredQuestions / totalQuestions))
+            (answeredCells / totalCells))
         .clamp(0, 100)
         .round();
   }
 
-  Future<void> handlePoinPermainan({isTimeOut = false}) async {
+  Future<void> handlePoinPermainan({
+    isTimeOut = false,
+    required correctChar,
+  }) async {
     try {
       int timeLimit = waktuPermainan;
       int timeTaken = timeLimit - remainingSeconds;
       int poin = calculatePoints(
-        totalQuestions: soalTerpilih.length,
-        answeredQuestions: indexSoalSelesai.length,
+        totalCells: grid.where((c) => c.isNotEmpty).length,
+        gridCharCorrect: correctChar,
         elapsedSeconds: timeTaken,
         maxTimeSeconds: timeLimit,
       );
@@ -354,11 +423,11 @@ class _HalamanPermainanState extends State<HalamanPermainan> {
 
   Widget papanPermainan(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.all(12.0),
+      padding: const EdgeInsets.all(8.0),
       child: Column(
         children: [
           GridView.builder(
-            physics: NeverScrollableScrollPhysics(),
+            physics: const NeverScrollableScrollPhysics(),
             shrinkWrap: true,
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: gridCount,
@@ -367,45 +436,136 @@ class _HalamanPermainanState extends State<HalamanPermainan> {
             ),
             itemCount: gridCount * gridCount,
             itemBuilder: (context, index) {
-              String? char = grid[index];
+              String char = grid[index];
+              TextEditingController controller = controllers[index];
               List<int> nomorList = nomorSoal[index] ?? [];
+              bool isActive = indexGridActive.contains(index);
 
               return GestureDetector(
                 onTap: () {
-                  setState(() {
-                    if (char != isiJawaban[index]) {
-                      isiJawaban[index] = null;
-                    }
-                  });
+                  FocusScope.of(context).requestFocus(focusNodes[index]);
                 },
                 child: Stack(
                   clipBehavior: Clip.none,
                   children: [
-                    Container(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(10),
-                        color:
-                            char == null
-                                ? Theme.of(context).primaryColor
-                                : isiJawaban[index] == null
-                                ? Colors.white
-                                : char == isiJawaban[index]
-                                ? Colors.green.shade400
-                                : Colors.red.shade400,
-                      ),
-                      child: Center(
-                        child:
-                            char == null
-                                ? Text("")
-                                : Text(isiJawaban[index] ?? ""),
-                      ),
+                    // ✅ hanya cell ini yang listen
+                    ValueListenableBuilder<List<bool>>(
+                      valueListenable: gridCharCorrect,
+                      builder: (context, listCorrect, _) {
+                        bool isCorrect = listCorrect[index];
+
+                        return Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              width: 2,
+                              color:
+                                  indexGridActive.isNotEmpty &&
+                                          indexGridActive.contains(index)
+                                      ? Colors.green.shade600
+                                      : char != ""
+                                      ? Colors.white
+                                      : Theme.of(context).primaryColor,
+                            ),
+                            color:
+                                char == ""
+                                    ? Theme.of(context).primaryColor
+                                    : controller.text.isEmpty
+                                    ? Colors.white
+                                    : isCorrect
+                                    ? Colors.green.shade400
+                                    : Colors.red.shade400,
+                          ),
+                          child:
+                              char == ""
+                                  ? Container()
+                                  : KeyboardListener(
+                                    focusNode: FocusNode(),
+                                    onKeyEvent: (event) {
+                                      if (event is KeyDownEvent &&
+                                          event.logicalKey ==
+                                              LogicalKeyboardKey.backspace) {
+                                        if (controller.text.isEmpty &&
+                                            isActive) {
+                                          _moveToPrev(index);
+                                        }
+                                      }
+                                    },
+                                    child: TextField(
+                                      inputFormatters: [
+                                        LockCorrectCharFormatter(
+                                          gridCharCorrect.value[index],
+                                        ),
+                                      ],
+                                      controller: controller,
+                                      focusNode: focusNodes[index],
+                                      textAlign: TextAlign.center,
+                                      maxLength: 1,
+                                      decoration: const InputDecoration(
+                                        counterText: "",
+                                        border: InputBorder.none,
+                                        isCollapsed: true,
+                                        contentPadding: EdgeInsets.zero,
+                                      ),
+                                      style: const TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.black,
+                                      ),
+                                      onChanged: (val) {
+                                        if (val.isNotEmpty && isActive) {
+                                          final correct =
+                                              char == val.toUpperCase();
+
+                                          // update flag benar utk sel ini
+                                          final temp = List<bool>.from(
+                                            gridCharCorrect.value,
+                                          );
+                                          temp[index] = correct;
+                                          gridCharCorrect.value = temp;
+
+                                          // ✅ hitung total sel input (unik) dan berapa yang sudah benar
+                                          final int totalInputCells =
+                                              grid
+                                                  .where((c) => c.isNotEmpty)
+                                                  .length;
+
+                                          int correctCount = 0;
+                                          for (
+                                            int i = 0;
+                                            i < grid.length;
+                                            i++
+                                          ) {
+                                            if (grid[i].isNotEmpty && temp[i]) {
+                                              correctCount++;
+                                            }
+                                          }
+
+                                          final bool allCorrect =
+                                              correctCount == totalInputCells;
+
+                                          if (allCorrect) {
+                                            handlePoinPermainan(
+                                              correctChar: temp,
+                                            ); // 🎉 semua benar
+                                          } else {
+                                            _moveToNext(
+                                              index,
+                                            ); // lanjut ke sel berikutnya
+                                          }
+                                        }
+                                      },
+                                    ),
+                                  ),
+                        );
+                      },
                     ),
                     if (nomorList.isNotEmpty)
                       Positioned(
                         top: nomorList.length == 1 ? -5 : -10,
                         right: nomorList.length == 1 ? -5 : 0,
                         child: Container(
-                          padding: EdgeInsets.symmetric(
+                          padding: const EdgeInsets.symmetric(
                             vertical: 2,
                             horizontal: 5,
                           ),
@@ -417,7 +577,10 @@ class _HalamanPermainanState extends State<HalamanPermainan> {
                             nomorList.length == 1
                                 ? nomorList.first.toString()
                                 : nomorList.join(', '),
-                            style: TextStyle(fontSize: 10, color: Colors.white),
+                            style: const TextStyle(
+                              fontSize: 10,
+                              color: Colors.white,
+                            ),
                           ),
                         ),
                       ),
@@ -426,10 +589,11 @@ class _HalamanPermainanState extends State<HalamanPermainan> {
               );
             },
           ),
+
           Container(
             width: double.infinity,
             margin: const EdgeInsets.symmetric(vertical: 12.0),
-            padding: EdgeInsets.all(15),
+            padding: EdgeInsets.all(8),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(10),
               color: Colors.green.shade600,
@@ -444,92 +608,60 @@ class _HalamanPermainanState extends State<HalamanPermainan> {
               ),
             ),
           ),
-          GridView.builder(
-            physics: NeverScrollableScrollPhysics(),
-            shrinkWrap: true,
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 7,
-              crossAxisSpacing: 6,
-              mainAxisSpacing: 6,
-            ),
-            itemCount: kunciJawaban.length,
-            itemBuilder: (_, index) {
-              String kunci = kunciJawaban[index];
+          Wrap(
+            spacing: 4,
+            runSpacing: 4,
+            alignment: WrapAlignment.center,
+            children:
+                List<int>.generate(
+                  soalTerpilih.length,
+                  (int index) => index,
+                ).map((nomor) {
+                  return ElevatedButton(
+                    onPressed: () {
+                      Soal soal = soalTerpilih[nomor];
 
-              return ElevatedButton(
-                onPressed: () {
-                  int startIndex = soalActive.x + (soalActive.y * gridCount);
+                      int startIndex = soal.x + (soal.y * gridCount);
 
-                  for (var j = 0; j < soalActive.jawaban.length; j++) {
-                    int currentIndex;
+                      FocusScope.of(
+                        context,
+                      ).requestFocus(focusNodes[startIndex]);
+                      SystemChannels.textInput.invokeMethod('TextInput.show');
 
-                    if (soalActive.arah == Arah.mendatar) {
-                      currentIndex = startIndex + j;
-                    } else {
-                      currentIndex = startIndex + (j * gridCount);
-                    }
+                      if (soalIndex != nomor) {
+                        setState(() {
+                          indexGridActive = [];
+                          soalIndex = nomor;
+                          soalActive = soal;
 
-                    // Cek apakah posisi saat ini belum diisi
-                    if (isiJawaban[currentIndex] == null ||
-                        isiJawaban[currentIndex] == "") {
-                      isiJawaban[currentIndex] = kunci;
-                      break; // 👉 berhenti setelah mengisi satu huruf
-                    }
-                  }
-
-                  for (var i = 0; i < soalTerpilih.length; i++) {
-                    Soal soal = soalTerpilih[i];
-                    int indexSoal = soal.x + (soal.y * gridCount);
-                    List<int> keysToCombine = <int>[];
-
-                    for (var j = 0; j < soal.jawaban.length; j++) {
-                      String jawabanChar = soal.jawaban[j];
-                      int indexJawaban;
-
-                      if (soal.arah == Arah.mendatar) {
-                        indexJawaban = indexSoal + j;
-                      } else {
-                        indexJawaban = indexSoal + (j * gridCount);
+                          for (var i = 0; i < soalActive.jawaban.length; i++) {
+                            if (soalActive.arah == Arah.menurun) {
+                              indexGridActive.add(startIndex + (i * gridCount));
+                            } else {
+                              indexGridActive.add(startIndex + i);
+                            }
+                          }
+                        });
                       }
-
-                      if (jawabanChar == isiJawaban[indexJawaban]) {
-                        keysToCombine.add(indexJawaban);
-                      }
-                    }
-
-                    if (keysToCombine.isNotEmpty && soalIndex == i) {
-                      String jawabanDiIsi =
-                          keysToCombine
-                              .map((key) => isiJawaban[key] ?? '')
-                              .join();
-
-                      if (jawabanDiIsi.contains(soal.jawaban)) {
-                        indexSoalSelesai.add(soalIndex);
-                      }
-                    }
-                  }
-
-                  setState(() {});
-
-                  if (indexSoalSelesai.length == soalTerpilih.length) {
-                    timer?.cancel();
-                    handlePoinPermainan();
-                  }
-                },
-                style: buttonStyle,
-                child: Text(
-                  kunci,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              );
-            },
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor:
+                          soalIndex == nomor
+                              ? Colors.green.shade600
+                              : Colors.blue.shade600,
+                      minimumSize: const Size(40, 40),
+                    ),
+                    child: Text(
+                      "${nomor + 1}",
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  );
+                }).toList(),
           ),
-          const SizedBox(height: 12),
         ],
       ),
     );
@@ -591,47 +723,27 @@ class _HalamanPermainanState extends State<HalamanPermainan> {
         body:
             loading
                 ? Center(child: CircularProgressIndicator())
-                : papanPermainan(context),
-        persistentFooterAlignment: AlignmentDirectional.center,
-        persistentFooterButtons: [
-          Wrap(
-            spacing: 4,
-            runSpacing: 4,
-            alignment: WrapAlignment.center,
-            children:
-                List<int>.generate(
-                  soalTerpilih.length,
-                  (int index) => index,
-                ).map((nomor) {
-                  return ElevatedButton(
-                    onPressed: () {
-                      setState(() {
-                        if (soalIndex != nomor) {
-                          soalIndex = nomor;
-                          soalActive = soalTerpilih[nomor];
-                        }
-                      });
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor:
-                          soalIndex == nomor
-                              ? Colors.green.shade600
-                              : Colors.blue.shade600,
-                      minimumSize: const Size(40, 40),
-                    ),
-                    child: Text(
-                      "${nomor + 1}",
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  );
-                }).toList(),
-          ),
-        ],
+                : SingleChildScrollView(child: papanPermainan(context)),
       ),
+    );
+  }
+}
+
+class LockCorrectCharFormatter extends TextInputFormatter {
+  final bool isLocked;
+  LockCorrectCharFormatter(this.isLocked);
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    if (isLocked) {
+      return oldValue; // cegah perubahan
+    }
+    return TextEditingValue(
+      text: newValue.text.toUpperCase(),
+      selection: newValue.selection,
     );
   }
 }
