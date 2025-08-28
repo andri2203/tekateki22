@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'dart:math';
+import '../services/notification_service.dart';
 
 class HalamanTambahSoal extends StatefulWidget {
   final bool isNewLevel;
@@ -360,6 +361,10 @@ class _HalamanTambahSoalState extends State<HalamanTambahSoal> {
       };
       if (widget.isNewLevel == false && reference != null) {
         await reference.update(data);
+        await NotificationService.showNotification(
+          title: "Sukses",
+          body: "Soal berhasil diperbarui!",
+        );
       } else {
         await FirebaseFirestore.instance
             .collection('permainan')
@@ -367,6 +372,10 @@ class _HalamanTambahSoalState extends State<HalamanTambahSoal> {
               widget.data['name'].toString().toLowerCase().replaceAll(" ", "-"),
             )
             .set(data);
+        await NotificationService.showNotification(
+          title: "Sukses",
+          body: "Level & Soal berhasil diunggah!",
+        );
       }
       setState(() {
         isLoading = false;
@@ -425,6 +434,10 @@ class _HalamanTambahSoalState extends State<HalamanTambahSoal> {
 
     if (isDelete == true && reference != null) {
       reference.delete();
+      await NotificationService.showNotification(
+        title: "Sukses",
+        body: "Level & Soal berhasil dihapus!",
+      );
       if (mounted) {
         Navigator.of(context).pop();
       }

@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:tekateki22/pages/halaman_about_us.dart';
 import '../components/styles.dart';
 import 'package:tekateki22/pages/halaman_level.dart';
 import 'package:tekateki22/pages/halaman_pengaturan.dart';
@@ -36,6 +37,14 @@ class _HalamanUtamaState extends State<HalamanUtama> {
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
         actions: [
+          IconButton(
+            onPressed:
+                () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => HalamanAboutUs()),
+                ),
+            icon: Icon(Icons.info),
+          ),
           IconButton(
             onPressed: () async {
               final shouldLogout = await showDialog<bool>(
